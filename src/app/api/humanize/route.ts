@@ -21,6 +21,7 @@ const requestSchema = z.object({
     ])
     .optional(),
   strength: z.enum(["minimal", "balanced", "strong", "maximum"]).optional(),
+  strengthLevel: z.number().min(0).max(100).optional(),
   styleProfile: z
     .object({
       avgSentenceLength: z.number().min(4).max(40),
@@ -137,6 +138,58 @@ const DECODING_PRESETS: Record<string, GenerationConfig> = {
     maxTokens: 1700,
   },
 };
+
+type StrengthMode = "minimal" | "balanced" | "strong" | "maximum";
+
+const STRENGTH_LEVEL_ANCHORS: Array<{ level: number; mode: StrengthMode }> = [
+  { level: 0, mode: "minimal" },
+  { level: 33, mode: "balanced" },
+  { level: 66, mode: "strong" },
+  { level: 100, mode: "maximum" },
+];
+
+function clampStrengthLevel(level: number): number {
+  return Math.max(0, Math.min(100, level));
+}
+
+function getStrengthModeFromLevel(level: number): StrengthMode {
+  if (level < 25) {
+    return "minimal";
+  }
+  if (level < 55) {
+    return "balanced";
+  }
+  if (level < 80) {
+    return "strong";
+  }
+  return "maximum";
+}
+
+function interpolateConfig(
+  left: GenerationConfig,
+  right: GenerationConfig,
+  ratio: number,
+): GenerationConfig {
+  return {
+    temperature: left.temperature + (right.temperature - left.temperature) * ratio,
+    topP: left.topP + (right.topP - left.topP) * ratio,
+    maxTokens: Math.round(left.maxTokens + (right.maxTokens - left.maxTokens) * ratio),
+  };
+}
+
+function getGenerationConfigForStrengthLevel(level: number): GenerationConfig {
+  const clampedLevel = clampStrengthLevel(level);
+  for (let index = 0; index < STRENGTH_LEVEL_ANCHORS.length - 1; index += 1) {
+    const left = STRENGTH_LEVEL_ANCHORS[index];
+    const right = STRENGTH_LEVEL_ANCHORS[index + 1];
+    if (clampedLevel >= left.level && clampedLevel <= right.level) {
+      const span = Math.max(1, right.level - left.level);
+      const ratio = (clampedLevel - left.level) / span;
+      return interpolateConfig(DECODING_PRESETS[left.mode], DECODING_PRESETS[right.mode], ratio);
+    }
+  }
+  return DECODING_PRESETS.maximum;
+}
 
 function getStyleProfileInstruction(
   styleProfile:
@@ -547,7 +600,8 @@ export async function POST(request: Request) {
 
     const inputText = parsedBody.data.text.trim();
     const tone = parsedBody.data.tone ?? "professional";
-    const strength = parsedBody.data.strength ?? "balanced";
+    const strengthLevel = clampStrengthLevel(parsedBody.data.strengthLevel ?? 50);
+    const strength = parsedBody.data.strength ?? getStrengthModeFromLevel(strengthLevel);
     const styleProfileInstruction = getStyleProfileInstruction(parsedBody.data.styleProfile);
     const preserveCitationMarkers = hasCitationMarkers(inputText);
     const inputWordCount = countWords(inputText);
@@ -570,7 +624,7 @@ export async function POST(request: Request) {
     }
 
     const model = process.env.MISTRAL_MODEL || "mistral-large-latest";
-    const strengthConfig = DECODING_PRESETS[strength] || DECODING_PRESETS.balanced;
+    const strengthConfig = getGenerationConfigForStrengthLevel(strengthLevel);
     const toneProfile = TONE_PROFILES[tone] || TONE_PROFILES.professional;
     const generationConfig = getGenerationConfigForTone(strengthConfig, tone);
     let outputText = "";
@@ -590,7 +644,7 @@ export async function POST(request: Request) {
               ? [
                   "Humanize the following text.",
                   `Tone target: ${tone}. ${toneProfile.instruction}`,
-                  `Rewrite strength: ${strength}. ${STRENGTH_INSTRUCTIONS[strength]}`,
+                  `Rewrite strength: ${strength} (${Math.round(strengthLevel)} / 100). ${STRENGTH_INSTRUCTIONS[strength]}`,
                   `Required style rules: ${toneProfile.requiredStyleRules.join(" ")}`,
                   `Avoid these patterns: ${toneProfile.blockedPatterns.join("; ")}.`,
                   styleProfileInstruction
@@ -608,7 +662,7 @@ export async function POST(request: Request) {
                   "Rewrite the same input again with stricter natural-writing cleanup.",
                   "Previous output failed quality checks.",
                   `Tone target: ${tone}. ${toneProfile.instruction}`,
-                  `Rewrite strength: ${strength}. ${STRENGTH_INSTRUCTIONS[strength]}`,
+                  `Rewrite strength: ${strength} (${Math.round(strengthLevel)} / 100). ${STRENGTH_INSTRUCTIONS[strength]}`,
                   `Required style rules: ${toneProfile.requiredStyleRules.join(" ")}`,
                   `Avoid these patterns: ${toneProfile.blockedPatterns.join("; ")}.`,
                   styleProfileInstruction
@@ -687,6 +741,7 @@ export async function POST(request: Request) {
       model,
       tone,
       strength,
+      strengthLevel,
       generationConfig,
       toneProfile: {
         instruction: toneProfile.instruction,

@@ -50,6 +50,7 @@ type HumanizeResponse = {
   qualityScore?: number;
   tone?: ToneMode;
   strength?: StrengthMode;
+  strengthLevel?: number;
   styleProfileApplied?: boolean;
 };
 
@@ -249,6 +250,19 @@ function getJaccardSimilarityPercent(left: string, right: string): number {
   return (intersectionCount / unionCount) * 100;
 }
 
+function getStrengthModeFromLevel(level: number): StrengthMode {
+  if (level < 25) {
+    return "minimal";
+  }
+  if (level < 55) {
+    return "balanced";
+  }
+  if (level < 80) {
+    return "strong";
+  }
+  return "maximum";
+}
+
 function sleep(ms: number) {
   return new Promise((resolve) => window.setTimeout(resolve, ms));
 }
@@ -366,7 +380,6 @@ export default function Home() {
   const [historyMessage, setHistoryMessage] = useState("");
   const [historyItems, setHistoryItems] = useState<RewriteHistoryItem[]>([]);
   const [toneMode, setToneMode] = useState<ToneMode>("professional");
-  const [strengthMode, setStrengthMode] = useState<StrengthMode>("balanced");
   const [humanizeLevel, setHumanizeLevel] = useState(50);
   const [isProfileWindowOpen, setIsProfileWindowOpen] = useState(false);
   const [themeMode, setThemeMode] = useState<ThemeMode>("system");
@@ -395,6 +408,7 @@ export default function Home() {
 
   const visibleOutputText = streamedOutputText || outputText;
   const hasOutput = visibleOutputText.trim().length > 0;
+  const strengthMode = useMemo(() => getStrengthModeFromLevel(humanizeLevel), [humanizeLevel]);
   const wordCount = useMemo(() => countWords(inputText), [inputText]);
   const overLimit = wordCount > MAX_WORDS_PER_REQUEST;
   const isDarkMode = themeMode === "system" ? systemPrefersDark : themeMode === "dark";
@@ -902,6 +916,7 @@ export default function Home() {
           text: inputText,
           tone: toneMode,
           strength: strengthMode,
+          strengthLevel: humanizeLevel,
           styleProfile:
             matchMyVoice && writingProfile
               ? {
@@ -926,6 +941,9 @@ export default function Home() {
       setStreamedOutputText("");
       void streamOutputInPhases(payload.output);
       updateWritingProfileFromOutput(payload.output);
+      if (typeof payload.strengthLevel === "number") {
+        setHumanizeLevel(payload.strengthLevel);
+      }
       setQualityScore(payload.qualityScore ?? null);
       setRequestMeta(
         `Humanized successfully. ${payload.outputWordCount} words generated.${
@@ -1539,7 +1557,10 @@ export default function Home() {
               <div className="mt-4 space-y-3">
                 <div className="flex items-center justify-between text-xs">
                   <p className={isDarkMode ? "text-slate-300" : "text-slate-600"}>
-                    Humanization strength: <span className="font-semibold capitalize">{strengthMode}</span>
+                    Humanization strength:{" "}
+                    <span className="font-semibold capitalize">
+                      {strengthMode} ({humanizeLevel}/100)
+                    </span>
                   </p>
                   <p className={isDarkMode ? "text-slate-400" : "text-slate-500"}>
                     Ctrl/Cmd + Enter to run | Ctrl/Cmd + K for palette
@@ -1551,19 +1572,7 @@ export default function Home() {
                   max={100}
                   step={1}
                   value={humanizeLevel}
-                  onChange={(event) => {
-                    const nextLevel = Number(event.target.value);
-                    setHumanizeLevel(nextLevel);
-                    if (nextLevel < 25) {
-                      setStrengthMode("minimal");
-                    } else if (nextLevel < 55) {
-                      setStrengthMode("balanced");
-                    } else if (nextLevel < 80) {
-                      setStrengthMode("strong");
-                    } else {
-                      setStrengthMode("maximum");
-                    }
-                  }}
+                  onChange={(event) => setHumanizeLevel(Number(event.target.value))}
                   className="w-full accent-indigo-500"
                   aria-label="Humanization strength slider"
                 />
