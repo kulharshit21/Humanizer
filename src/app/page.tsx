@@ -1,9 +1,11 @@
 "use client";
 
-import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertTriangle,
   BriefcaseBusiness,
+  Check,
+  Command,
   Copy,
   FileDown,
   HeartHandshake,
@@ -48,6 +50,7 @@ type HumanizeResponse = {
   qualityScore?: number;
   tone?: ToneMode;
   strength?: StrengthMode;
+  styleProfileApplied?: boolean;
 };
 
 type PrivacyMode = "no_log" | "hash_only" | "full_text_opt_in";
@@ -82,6 +85,19 @@ type DetectResponse = {
   disclaimer: string;
   reducedDetail: boolean;
   limitations?: string;
+};
+
+type WritingProfile = {
+  sampleCount: number;
+  avgSentenceLength: number;
+  lexicalDiversity: number;
+  preferredTone: ToneMode;
+  updatedAt: string;
+};
+
+type DiffSegment = {
+  text: string;
+  kind: "same" | "added" | "space";
 };
 
 type ProfileForm = {
@@ -233,6 +249,63 @@ function getJaccardSimilarityPercent(left: string, right: string): number {
   return (intersectionCount / unionCount) * 100;
 }
 
+function sleep(ms: number) {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
+function normalizeDiffToken(token: string): string {
+  return token.toLowerCase().replace(/[^a-z0-9']/g, "");
+}
+
+function buildDiffSegments(inputText: string, outputText: string): {
+  segments: DiffSegment[];
+  removedTokens: string[];
+} {
+  const inputTokens = inputText.match(/\S+|\s+/g) || [];
+  const outputTokens = outputText.match(/\S+|\s+/g) || [];
+  const inputCount = new Map<string, number>();
+  const outputCount = new Map<string, number>();
+
+  inputTokens.forEach((token) => {
+    if (/^\s+$/.test(token)) {
+      return;
+    }
+    const normalized = normalizeDiffToken(token);
+    if (!normalized) {
+      return;
+    }
+    inputCount.set(normalized, (inputCount.get(normalized) || 0) + 1);
+  }, []);
+
+  const segments = outputTokens.map((token) => {
+    if (/^\s+$/.test(token)) {
+      return { text: token, kind: "space" as const };
+    }
+    const normalized = normalizeDiffToken(token);
+    if (!normalized) {
+      return { text: token, kind: "same" as const };
+    }
+    const remainingInputCount = inputCount.get(normalized) || 0;
+    const consumedOutputCount = outputCount.get(normalized) || 0;
+    outputCount.set(normalized, consumedOutputCount + 1);
+    return {
+      text: token,
+      kind: consumedOutputCount < remainingInputCount ? ("same" as const) : ("added" as const),
+    };
+  });
+
+  const removedTokens: string[] = [];
+  for (const [token, count] of inputCount.entries()) {
+    const producedCount = outputCount.get(token) || 0;
+    const missing = Math.max(0, count - producedCount);
+    for (let index = 0; index < missing; index += 1) {
+      removedTokens.push(token);
+    }
+  }
+
+  return { segments, removedTokens };
+}
+
 function getSafeAuthMessage(error: unknown, mode: AuthMode): string {
   if (!(error instanceof Error)) {
     return "Authentication failed. Please try again.";
@@ -270,6 +343,7 @@ function getSafeAuthMessage(error: unknown, mode: AuthMode): string {
 }
 
 export default function Home() {
+  const outputStreamRef = useRef(0);
   const [session, setSession] = useState<Session | null>(null);
   const [authMode, setAuthMode] = useState<AuthMode>("signin");
   const [email, setEmail] = useState("");
@@ -310,8 +384,17 @@ export default function Home() {
   const [detailsEnabled, setDetailsEnabled] = useState(false);
   const [vendorConsent, setVendorConsent] = useState(false);
   const [showIntegrityModal, setShowIntegrityModal] = useState(false);
+  const [streamedOutputText, setStreamedOutputText] = useState("");
+  const [isStreamingOutput, setIsStreamingOutput] = useState(false);
+  const [streamingPhase, setStreamingPhase] = useState<"draft" | "refine" | null>(null);
+  const [showDiffPreview, setShowDiffPreview] = useState(true);
+  const [writingProfile, setWritingProfile] = useState<WritingProfile | null>(null);
+  const [matchMyVoice, setMatchMyVoice] = useState(false);
+  const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
+  const [commandQuery, setCommandQuery] = useState("");
 
-  const hasOutput = outputText.trim().length > 0;
+  const visibleOutputText = streamedOutputText || outputText;
+  const hasOutput = visibleOutputText.trim().length > 0;
   const wordCount = useMemo(() => countWords(inputText), [inputText]);
   const overLimit = wordCount > MAX_WORDS_PER_REQUEST;
   const isDarkMode = themeMode === "system" ? systemPrefersDark : themeMode === "dark";
@@ -332,7 +415,7 @@ export default function Home() {
     "Polishing readability...",
     "Finalizing humanized output...",
   ];
-  const activeText = outputText || inputText;
+  const activeText = visibleOutputText || inputText;
   const readingTimeMinutes = useMemo(
     () => Math.max(1, Math.ceil((countWords(activeText) || 0) / 200)),
     [activeText],
@@ -346,21 +429,21 @@ export default function Home() {
     return Math.round((countWords(activeText) / sentenceCount) * 10) / 10;
   }, [activeText, sentenceCount]);
   const lexicalDiversity = useMemo(() => getLexicalDiversity(activeText), [activeText]);
-  const outputReadability = useMemo(() => getReadabilityScore(outputText), [outputText]);
+  const outputReadability = useMemo(() => getReadabilityScore(visibleOutputText), [visibleOutputText]);
   const inputReadability = useMemo(() => getReadabilityScore(inputText), [inputText]);
-  const outputVariation = useMemo(() => getVariationScore(outputText), [outputText]);
+  const outputVariation = useMemo(() => getVariationScore(visibleOutputText), [visibleOutputText]);
   const inputVariation = useMemo(() => getVariationScore(inputText), [inputText]);
   const faithfulnessScore = useMemo(
-    () => getJaccardSimilarityPercent(inputText, outputText),
-    [inputText, outputText],
+    () => getJaccardSimilarityPercent(inputText, visibleOutputText),
+    [inputText, visibleOutputText],
   );
   const changedWordEstimate = useMemo(() => {
-    if (!inputText.trim() || !outputText.trim()) {
+    if (!inputText.trim() || !visibleOutputText.trim()) {
       return 0;
     }
     const inputWords = Math.max(1, countWords(inputText));
     return Math.round(((100 - faithfulnessScore) / 100) * inputWords);
-  }, [faithfulnessScore, inputText, outputText]);
+  }, [faithfulnessScore, inputText, visibleOutputText]);
   const styleSignals = useMemo(
     () => [
       { label: "Naturalness", value: hasOutput ? qualityScore : null },
@@ -378,16 +461,16 @@ export default function Home() {
     [session],
   );
   const explainChanges = useMemo(() => {
-    if (!inputText.trim() || !outputText.trim()) {
+    if (!inputText.trim() || !visibleOutputText.trim()) {
       return [];
     }
     const inputWords = countWords(inputText);
-    const outputWords = countWords(outputText);
+    const outputWords = countWords(visibleOutputText);
     const delta = outputWords - inputWords;
     const inputSentences = splitSentences(inputText).length;
-    const outputSentences = splitSentences(outputText).length;
+    const outputSentences = splitSentences(visibleOutputText).length;
     const inputLexical = getLexicalDiversity(inputText);
-    const outputLexical = getLexicalDiversity(outputText);
+    const outputLexical = getLexicalDiversity(visibleOutputText);
     const readabilityDelta = outputReadability - inputReadability;
     const variationDelta = outputVariation - inputVariation;
     return [
@@ -400,7 +483,84 @@ export default function Home() {
         ? `Rewrite intensity applied with ${Math.abs(delta)} word difference.`
         : "Length stayed close to original.",
     ];
-  }, [inputReadability, inputText, inputVariation, outputReadability, outputText, outputVariation]);
+  }, [inputReadability, inputText, inputVariation, outputReadability, outputVariation, visibleOutputText]);
+
+  const diffPreview = useMemo(
+    () => buildDiffSegments(inputText, outputText),
+    [inputText, outputText],
+  );
+
+  const commandActions = [
+    {
+      id: "humanize",
+      label: "Humanize current input",
+      keywords: "rewrite run generate",
+      run: () => void handleHumanize(),
+    },
+    {
+      id: "detect",
+      label: "Run authenticity signals",
+      keywords: "detect scan authenticity",
+      run: () => void handleRunAuthenticityScan(),
+    },
+    {
+      id: "copy",
+      label: "Copy clean output",
+      keywords: "copy output",
+      run: () => void handleCopy(),
+    },
+    {
+      id: "copy-highlight",
+      label: "Copy output with highlights",
+      keywords: "copy diff highlights",
+      run: () => void handleCopyWithHighlights(),
+    },
+    {
+      id: "download",
+      label: "Download TXT",
+      keywords: "export txt",
+      run: () => handleDownloadTxt(),
+    },
+    {
+      id: "cycle-tone",
+      label: `Cycle tone (current: ${toneMode})`,
+      keywords: "tone mode",
+      run: () => {
+        const toneIndex = TONE_OPTIONS.findIndex((item) => item.value === toneMode);
+        const nextIndex = (toneIndex + 1) % TONE_OPTIONS.length;
+        setToneMode(TONE_OPTIONS[nextIndex].value);
+      },
+    },
+    {
+      id: "load-template",
+      label: "Load Academic template",
+      keywords: "template sample academic",
+      run: () => {
+        const sample = SAMPLE_INPUTS[0];
+        if (sample) {
+          setInputText(sample.text);
+          setToneMode(sample.tone);
+        }
+      },
+    },
+    {
+      id: "toggle-match-voice",
+      label: matchMyVoice ? "Disable Match my voice" : "Enable Match my voice",
+      keywords: "voice profile personalization",
+      run: () => setMatchMyVoice((prev) => !prev),
+    },
+  ];
+
+  const filteredCommandActions = (() => {
+    const query = commandQuery.trim().toLowerCase();
+    if (!query) {
+      return commandActions;
+    }
+    return commandActions.filter(
+      (action) =>
+        action.label.toLowerCase().includes(query) || action.keywords.toLowerCase().includes(query),
+    );
+  })();
 
   const loadUserData = useCallback(async (activeSession: Session) => {
     const supabase = getSupabaseBrowserClient();
@@ -470,6 +630,33 @@ export default function Home() {
   }, [themeMode]);
 
   useEffect(() => {
+    const rawProfile = window.localStorage.getItem("humanizer-writing-profile");
+    if (!rawProfile) {
+      return;
+    }
+    try {
+      const parsedProfile = JSON.parse(rawProfile) as WritingProfile;
+      if (
+        typeof parsedProfile.sampleCount === "number" &&
+        typeof parsedProfile.avgSentenceLength === "number" &&
+        typeof parsedProfile.lexicalDiversity === "number" &&
+        typeof parsedProfile.preferredTone === "string"
+      ) {
+        setWritingProfile(parsedProfile);
+      }
+    } catch {
+      window.localStorage.removeItem("humanizer-writing-profile");
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!writingProfile) {
+      return;
+    }
+    window.localStorage.setItem("humanizer-writing-profile", JSON.stringify(writingProfile));
+  }, [writingProfile]);
+
+  useEffect(() => {
     if (!humanizeLoading) {
       setLoadingStepIndex(0);
       return;
@@ -489,12 +676,17 @@ export default function Home() {
         event.preventDefault();
         void handleHumanize();
       }
+      if (isPrimary && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        setIsCommandPaletteOpen((prev) => !prev);
+      }
       if (isPrimary && event.shiftKey && event.key.toLowerCase() === "c") {
         event.preventDefault();
         void handleCopy();
       }
       if (event.key === "Escape") {
         setIsProfileWindowOpen(false);
+        setIsCommandPaletteOpen(false);
       }
     }
 
@@ -591,11 +783,91 @@ export default function Home() {
     setProfileMessage("");
     setAuthenticityData(null);
     setAuthenticityError("");
+    setStreamedOutputText("");
+    setIsStreamingOutput(false);
+    setStreamingPhase(null);
   }
+
+  function updateWritingProfileFromOutput(nextOutput: string) {
+    if (!nextOutput.trim()) {
+      return;
+    }
+    const nextSentenceLengths = getSentenceLengths(nextOutput);
+    const nextAvgSentenceLength =
+      nextSentenceLengths.length > 0
+        ? nextSentenceLengths.reduce((sum, value) => sum + value, 0) / nextSentenceLengths.length
+        : 0;
+    const nextLexicalDiversity = getLexicalDiversity(nextOutput);
+
+    setWritingProfile((prev) => {
+      if (!prev) {
+        return {
+          sampleCount: 1,
+          avgSentenceLength: Number(nextAvgSentenceLength.toFixed(2)),
+          lexicalDiversity: Number(nextLexicalDiversity.toFixed(2)),
+          preferredTone: toneMode,
+          updatedAt: new Date().toISOString(),
+        };
+      }
+      const sampleCount = prev.sampleCount + 1;
+      return {
+        sampleCount,
+        avgSentenceLength: Number(
+          ((prev.avgSentenceLength * prev.sampleCount + nextAvgSentenceLength) / sampleCount).toFixed(2),
+        ),
+        lexicalDiversity: Number(
+          ((prev.lexicalDiversity * prev.sampleCount + nextLexicalDiversity) / sampleCount).toFixed(2),
+        ),
+        preferredTone: toneMode,
+        updatedAt: new Date().toISOString(),
+      };
+    });
+  }
+
+  const streamOutputInPhases = useCallback(async (finalOutput: string) => {
+    const streamRunId = outputStreamRef.current + 1;
+    outputStreamRef.current = streamRunId;
+
+    const chunks = finalOutput.match(/\S+\s*/g) || [finalOutput];
+    if (chunks.length < 8) {
+      setStreamedOutputText(finalOutput);
+      setIsStreamingOutput(false);
+      setStreamingPhase(null);
+      return;
+    }
+
+    setIsStreamingOutput(true);
+    const draftTokenCount = Math.max(1, Math.floor(chunks.length * 0.62));
+    const reveal = async (start: number, end: number, step: number, phase: "draft" | "refine") => {
+      setStreamingPhase(phase);
+      for (let index = start; index < end; index += step) {
+        if (outputStreamRef.current !== streamRunId) {
+          return;
+        }
+        const sliceEnd = Math.min(end, index + step);
+        setStreamedOutputText(chunks.slice(0, sliceEnd).join(""));
+        await sleep(phase === "draft" ? 45 : 70);
+      }
+    };
+
+    await reveal(0, draftTokenCount, 4, "draft");
+    await sleep(240);
+    await reveal(draftTokenCount, chunks.length, 2, "refine");
+
+    if (outputStreamRef.current === streamRunId) {
+      setStreamedOutputText(finalOutput);
+      setIsStreamingOutput(false);
+      setStreamingPhase(null);
+    }
+  }, []);
 
   async function handleHumanize() {
     setHumanizeError("");
     setOutputText("");
+    setStreamedOutputText("");
+    outputStreamRef.current += 1;
+    setIsStreamingOutput(false);
+    setStreamingPhase(null);
     setRequestMeta("");
     setCopied(false);
     setQualityScore(null);
@@ -630,6 +902,14 @@ export default function Home() {
           text: inputText,
           tone: toneMode,
           strength: strengthMode,
+          styleProfile:
+            matchMyVoice && writingProfile
+              ? {
+                  avgSentenceLength: writingProfile.avgSentenceLength,
+                  lexicalDiversity: writingProfile.lexicalDiversity,
+                  preferredTone: writingProfile.preferredTone,
+                }
+              : undefined,
         }),
       });
 
@@ -643,9 +923,14 @@ export default function Home() {
       }
 
       setOutputText(payload.output);
+      setStreamedOutputText("");
+      void streamOutputInPhases(payload.output);
+      updateWritingProfileFromOutput(payload.output);
       setQualityScore(payload.qualityScore ?? null);
       setRequestMeta(
-        `Humanized successfully. ${payload.outputWordCount} words generated.`,
+        `Humanized successfully. ${payload.outputWordCount} words generated.${
+          payload.styleProfileApplied ? " Voice profile guidance applied." : ""
+        }`,
       );
       if (session) {
         void loadUserData(session);
@@ -658,13 +943,38 @@ export default function Home() {
   }
 
   async function handleCopy() {
-    if (!outputText) {
+    if (!outputText.trim()) {
       return;
     }
 
     await navigator.clipboard.writeText(outputText);
     setCopied(true);
     window.setTimeout(() => setCopied(false), 1800);
+  }
+
+  async function handleCopyWithHighlights() {
+    if (!outputText.trim()) {
+      return;
+    }
+    const highlighted = diffPreview.segments
+      .map((segment) => {
+        if (segment.kind !== "added") {
+          return segment.text;
+        }
+        return `[[+${segment.text.trim()}]]${segment.text.endsWith(" ") ? " " : ""}`;
+      })
+      .join("");
+    await navigator.clipboard.writeText(highlighted);
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 1800);
+  }
+
+  function handleAcceptAllChanges() {
+    if (!outputText.trim()) {
+      return;
+    }
+    setInputText(outputText);
+    setRequestMeta("Accepted rewrite as your new source text.");
   }
 
   function handleDownloadTxt() {
@@ -965,6 +1275,14 @@ export default function Home() {
             <div className="flex items-center gap-2">
               <button
                 type="button"
+                onClick={() => setIsCommandPaletteOpen(true)}
+                className="inline-flex items-center gap-2 rounded-full border border-white/35 bg-white/10 px-4 py-2 text-sm font-semibold text-white transition hover:bg-white/20"
+              >
+                <Command size={15} />
+                Cmd
+              </button>
+              <button
+                type="button"
                 onClick={() =>
                   setThemeMode((prev) =>
                     prev === "light" ? "dark" : prev === "dark" ? "system" : "light",
@@ -1223,7 +1541,9 @@ export default function Home() {
                   <p className={isDarkMode ? "text-slate-300" : "text-slate-600"}>
                     Humanization strength: <span className="font-semibold capitalize">{strengthMode}</span>
                   </p>
-                  <p className={isDarkMode ? "text-slate-400" : "text-slate-500"}>Ctrl/Cmd + Enter to run</p>
+                  <p className={isDarkMode ? "text-slate-400" : "text-slate-500"}>
+                    Ctrl/Cmd + Enter to run | Ctrl/Cmd + K for palette
+                  </p>
                 </div>
                 <input
                   type="range"
@@ -1247,6 +1567,43 @@ export default function Home() {
                   className="w-full accent-indigo-500"
                   aria-label="Humanization strength slider"
                 />
+              </div>
+              <div
+                className={`mt-3 rounded-2xl border p-3 ${
+                  isDarkMode ? "border-indigo-300/20 bg-[#141a40]" : "border-slate-200 bg-slate-50"
+                }`}
+              >
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <label
+                    className={`inline-flex items-center gap-2 text-xs font-medium ${
+                      isDarkMode ? "text-slate-200" : "text-slate-700"
+                    }`}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={matchMyVoice}
+                      onChange={(event) => setMatchMyVoice(event.target.checked)}
+                    />
+                    Match my voice
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => updateWritingProfileFromOutput(outputText)}
+                    disabled={!outputText.trim()}
+                    className={`rounded-lg px-2.5 py-1 text-[11px] font-medium transition disabled:opacity-50 ${
+                      isDarkMode
+                        ? "border border-indigo-300/20 bg-[#151b42] text-slate-200 hover:bg-[#1a2250]"
+                        : "border border-slate-200 bg-white text-slate-600 hover:bg-slate-100"
+                    }`}
+                  >
+                    Save profile from output
+                  </button>
+                </div>
+                <p className={`mt-2 text-[11px] ${isDarkMode ? "text-slate-300" : "text-slate-600"}`}>
+                  {writingProfile
+                    ? `Profile learned from ${writingProfile.sampleCount} rewrites | Avg sentence ${writingProfile.avgSentenceLength} words | Lexical diversity ${Math.round(writingProfile.lexicalDiversity)}%.`
+                    : "No profile yet. Generate and save a few outputs to personalize rewrite style."}
+                </p>
               </div>
               <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
                 {TONE_OPTIONS.map((toneOption) => (
@@ -1326,26 +1683,33 @@ export default function Home() {
                   isDarkMode ? "border-b border-indigo-300/15" : "border-b border-slate-100"
                 }`}
               >
-                <h3 className={`text-2xl font-semibold ${isDarkMode ? "text-slate-100" : "text-slate-800"}`}>
-                  Humanized Text
-                </h3>
+                <div>
+                  <h3 className={`text-2xl font-semibold ${isDarkMode ? "text-slate-100" : "text-slate-800"}`}>
+                    Humanized Text
+                  </h3>
+                  {isStreamingOutput ? (
+                    <p className={`mt-1 text-xs ${isDarkMode ? "text-indigo-200" : "text-blue-700"}`}>
+                      Live rewrite mode: {streamingPhase === "draft" ? "drafting" : "refining"}...
+                    </p>
+                  ) : null}
+                </div>
                 <div className="flex items-center gap-2">
                   <button
                     type="button"
-                    onClick={() => setInputText(outputText)}
-                    disabled={!outputText}
+                    onClick={handleAcceptAllChanges}
+                    disabled={!outputText.trim()}
                     className={`rounded-lg px-3 py-1.5 text-xs font-medium transition disabled:opacity-50 ${
                       isDarkMode
                         ? "border border-indigo-300/20 bg-[#151b42] text-slate-200 hover:bg-[#1a2250]"
                         : "border border-slate-200 bg-slate-50 text-slate-600 hover:bg-slate-100"
                     }`}
                   >
-                    Edit
+                    Accept all
                   </button>
                   <button
                     type="button"
                     onClick={handleCopy}
-                    disabled={!outputText}
+                    disabled={!outputText.trim()}
                     className={`inline-flex items-center gap-2 rounded-lg px-3 py-1.5 text-xs font-medium transition disabled:opacity-50 ${
                       isDarkMode
                         ? "border border-indigo-300/20 bg-[#151b42] text-slate-200 hover:bg-[#1a2250]"
@@ -1357,8 +1721,20 @@ export default function Home() {
                   </button>
                   <button
                     type="button"
+                    onClick={handleCopyWithHighlights}
+                    disabled={!outputText.trim()}
+                    className={`rounded-lg px-3 py-1.5 text-xs font-medium transition disabled:opacity-50 ${
+                      isDarkMode
+                        ? "border border-indigo-300/20 bg-[#151b42] text-slate-200 hover:bg-[#1a2250]"
+                        : "border border-slate-200 bg-slate-50 text-slate-600 hover:bg-slate-100"
+                    }`}
+                  >
+                    Copy + Highlights
+                  </button>
+                  <button
+                    type="button"
                     onClick={handleDownloadTxt}
-                    disabled={!outputText}
+                    disabled={!outputText.trim()}
                     className={`rounded-lg px-3 py-1.5 text-xs font-medium transition disabled:opacity-50 ${
                       isDarkMode
                         ? "border border-indigo-300/20 bg-[#151b42] text-slate-200 hover:bg-[#1a2250]"
@@ -1406,7 +1782,7 @@ export default function Home() {
                   </p>
                   <textarea
                     readOnly
-                    value={outputText}
+                    value={visibleOutputText}
                     placeholder="Your humanized text will appear here..."
                     aria-label="Humanized output"
                     className={`mt-3 h-72 w-full resize-none rounded-xl px-3 py-2 text-sm leading-6 outline-none ${
@@ -1432,7 +1808,7 @@ export default function Home() {
                           : "border border-slate-200 bg-slate-50 text-slate-600"
                       }`}
                     >
-                      Output: {countWords(outputText)} words
+                      Output: {countWords(visibleOutputText)} words
                     </span>
                     <span
                       className={`rounded-full px-2.5 py-1 text-[11px] font-medium ${
@@ -1444,8 +1820,71 @@ export default function Home() {
                       Estimated changed words: {changedWordEstimate}
                     </span>
                   </div>
+                  {(humanizeLoading || isStreamingOutput) && (
+                    <p className={`mt-3 text-xs ${isDarkMode ? "text-indigo-200" : "text-blue-700"}`}>
+                      {humanizeLoading
+                        ? loadingSteps[loadingStepIndex]
+                        : `Streaming ${streamingPhase === "draft" ? "draft" : "refined"} rewrite...`}
+                    </p>
+                  )}
                 </div>
               </div>
+              {showDiffPreview && outputText.trim() ? (
+                <div className="px-5 pb-3 sm:px-6">
+                  <div
+                    className={`rounded-xl border p-3 text-xs ${
+                      isDarkMode ? "border-indigo-300/20 bg-[#151b42]" : "border-slate-200 bg-slate-50"
+                    }`}
+                  >
+                    <div className="mb-2 flex items-center justify-between gap-2">
+                      <p className={`font-semibold ${isDarkMode ? "text-slate-100" : "text-slate-700"}`}>
+                        Before vs after diff
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => setShowDiffPreview(false)}
+                        className={`${isDarkMode ? "text-slate-300 hover:text-slate-100" : "text-slate-500 hover:text-slate-700"}`}
+                      >
+                        Hide
+                      </button>
+                    </div>
+                    <p className={`leading-6 ${isDarkMode ? "text-slate-200" : "text-slate-700"}`}>
+                      {diffPreview.segments.map((segment, index) => (
+                        <span
+                          key={`${segment.kind}-${index}`}
+                          className={
+                            segment.kind === "added"
+                              ? isDarkMode
+                                ? "rounded bg-emerald-500/20 px-0.5 text-emerald-200 transition-all"
+                                : "rounded bg-emerald-100 px-0.5 text-emerald-700 transition-all"
+                              : undefined
+                          }
+                        >
+                          {segment.text}
+                        </span>
+                      ))}
+                    </p>
+                    {diffPreview.removedTokens.length > 0 && (
+                      <p className={`mt-2 ${isDarkMode ? "text-slate-300" : "text-slate-600"}`}>
+                        Removed tokens (sample): {diffPreview.removedTokens.slice(0, 12).join(", ")}
+                        {diffPreview.removedTokens.length > 12 ? "..." : ""}
+                      </p>
+                    )}
+                  </div>
+                </div>
+              ) : outputText.trim() ? (
+                <div className="px-5 pb-3 text-right sm:px-6">
+                  <button
+                    type="button"
+                    onClick={() => setShowDiffPreview(true)}
+                    className={`text-xs font-medium ${
+                      isDarkMode ? "text-indigo-200 hover:text-indigo-100" : "text-blue-700 hover:text-blue-600"
+                    }`}
+                  >
+                    Show diff preview
+                  </button>
+                </div>
+              ) : null}
               <p className={`px-5 pb-4 text-xs sm:px-6 ${isDarkMode ? "text-slate-300" : "text-slate-500"}`}>
                 {requestMeta}
               </p>
@@ -1454,7 +1893,7 @@ export default function Home() {
                   <button
                     type="button"
                     onClick={handleSpeak}
-                    disabled={!outputText}
+                    disabled={!outputText.trim()}
                     className={`rounded-lg px-3 py-1.5 text-xs font-medium transition disabled:opacity-50 ${
                       isDarkMode
                         ? "border border-indigo-300/20 bg-[#151b42] text-slate-200 hover:bg-[#1a2250]"
@@ -2130,6 +2569,9 @@ export default function Home() {
                         onClick={() => {
                           setInputText(item.input_text);
                           setOutputText(item.output_text);
+                          setStreamedOutputText(item.output_text);
+                          setIsStreamingOutput(false);
+                          setStreamingPhase(null);
                           setQualityScore(item.quality_score);
                           setRequestMeta(
                             `Loaded saved rewrite. ${item.output_word_count} words.`,
@@ -2187,6 +2629,69 @@ export default function Home() {
                 Close
               </button>
             </div>
+          </div>
+        </div>
+      ) : null}
+      {isCommandPaletteOpen ? (
+        <div
+          className={`fixed inset-0 z-50 flex items-start justify-center p-4 pt-24 backdrop-blur-sm ${
+            isDarkMode ? "bg-slate-950/65" : "bg-slate-950/35"
+          }`}
+          onClick={() => setIsCommandPaletteOpen(false)}
+        >
+          <div
+            className={`w-full max-w-2xl rounded-2xl border p-4 ${
+              isDarkMode ? "border-indigo-300/20 bg-[#0f1433]" : "border-slate-200 bg-white"
+            }`}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="mb-3 flex items-center gap-2">
+              <Command size={16} className={isDarkMode ? "text-indigo-200" : "text-blue-700"} />
+              <p className={`text-sm font-semibold ${isDarkMode ? "text-slate-100" : "text-slate-800"}`}>
+                Command palette
+              </p>
+            </div>
+            <input
+              autoFocus
+              value={commandQuery}
+              onChange={(event) => setCommandQuery(event.target.value)}
+              placeholder="Search actions..."
+              className={`w-full rounded-xl px-3 py-2 text-sm outline-none ring-indigo-300 focus:ring-2 ${
+                isDarkMode
+                  ? "border border-indigo-300/20 bg-[#0b1030] text-slate-100"
+                  : "border border-slate-200 bg-slate-50 text-slate-700"
+              }`}
+            />
+            <div className="mt-3 max-h-72 space-y-2 overflow-y-auto">
+              {filteredCommandActions.length === 0 ? (
+                <p className={`text-xs ${isDarkMode ? "text-slate-400" : "text-slate-500"}`}>
+                  No matching actions.
+                </p>
+              ) : (
+                filteredCommandActions.map((action) => (
+                  <button
+                    key={action.id}
+                    type="button"
+                    onClick={() => {
+                      action.run();
+                      setIsCommandPaletteOpen(false);
+                      setCommandQuery("");
+                    }}
+                    className={`flex w-full items-center justify-between rounded-xl border px-3 py-2 text-left text-sm transition ${
+                      isDarkMode
+                        ? "border-indigo-300/20 bg-[#151b42] text-slate-100 hover:bg-[#1a2250]"
+                        : "border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100"
+                    }`}
+                  >
+                    <span>{action.label}</span>
+                    <Check size={14} className={isDarkMode ? "text-indigo-200" : "text-blue-600"} />
+                  </button>
+                ))
+              )}
+            </div>
+            <p className={`mt-3 text-[11px] ${isDarkMode ? "text-slate-400" : "text-slate-500"}`}>
+              Tip: press Ctrl/Cmd + K to open, Esc to close.
+            </p>
           </div>
         </div>
       ) : null}

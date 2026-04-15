@@ -21,6 +21,25 @@ const requestSchema = z.object({
     ])
     .optional(),
   strength: z.enum(["minimal", "balanced", "strong", "maximum"]).optional(),
+  styleProfile: z
+    .object({
+      avgSentenceLength: z.number().min(4).max(40),
+      lexicalDiversity: z.number().min(0).max(100),
+      preferredTone: z
+        .enum([
+          "casual",
+          "professional",
+          "creative",
+          "academic",
+          "linkedin",
+          "blog",
+          "email",
+          "simplify",
+          "human-like",
+        ])
+        .optional(),
+    })
+    .optional(),
 });
 
 type MistralMessage = {
@@ -118,6 +137,28 @@ const DECODING_PRESETS: Record<string, GenerationConfig> = {
     maxTokens: 1700,
   },
 };
+
+function getStyleProfileInstruction(
+  styleProfile:
+    | {
+        avgSentenceLength: number;
+        lexicalDiversity: number;
+        preferredTone?: string;
+      }
+    | undefined,
+): string | null {
+  if (!styleProfile) {
+    return null;
+  }
+  return [
+    "Match the user's writing fingerprint where possible.",
+    `Target average sentence length around ${styleProfile.avgSentenceLength.toFixed(1)} words.`,
+    `Target lexical diversity around ${styleProfile.lexicalDiversity.toFixed(1)}%.`,
+    styleProfile.preferredTone ? `If meaning allows, align rhythm with ${styleProfile.preferredTone} tone.` : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
+}
 
 function getBearerToken(request: Request): string | null {
   const authHeader = request.headers.get("authorization");
@@ -474,6 +515,7 @@ export async function POST(request: Request) {
     const inputText = parsedBody.data.text.trim();
     const tone = parsedBody.data.tone ?? "professional";
     const strength = parsedBody.data.strength ?? "balanced";
+    const styleProfileInstruction = getStyleProfileInstruction(parsedBody.data.styleProfile);
     const inputWordCount = countWords(inputText);
 
     if (inputWordCount > MAX_WORDS_PER_REQUEST) {
@@ -517,10 +559,15 @@ export async function POST(request: Request) {
                   `Rewrite strength: ${strength}. ${STRENGTH_INSTRUCTIONS[strength]}`,
                   `Required style rules: ${toneProfile.requiredStyleRules.join(" ")}`,
                   `Avoid these patterns: ${toneProfile.blockedPatterns.join("; ")}.`,
+                  styleProfileInstruction
+                    ? `Voice profile hint: ${styleProfileInstruction}`
+                    : null,
                   "Preserve all citation markers exactly (e.g., [2], [3], [4,7], [8-10], and in-text references).",
                   "",
                   inputText,
-                ].join("\n")
+                ]
+                    .filter(Boolean)
+                    .join("\n")
               : [
                   "Rewrite the same input again with stricter natural-writing cleanup.",
                   "Previous output failed quality checks.",
@@ -528,13 +575,18 @@ export async function POST(request: Request) {
                   `Rewrite strength: ${strength}. ${STRENGTH_INSTRUCTIONS[strength]}`,
                   `Required style rules: ${toneProfile.requiredStyleRules.join(" ")}`,
                   `Avoid these patterns: ${toneProfile.blockedPatterns.join("; ")}.`,
+                  styleProfileInstruction
+                    ? `Voice profile hint: ${styleProfileInstruction}`
+                    : null,
                   `Detected issues: ${validationResult.issues.join(" | ")}`,
                   "Fix all issues, preserve every citation marker exactly, avoid em-dash overuse, and return only final rewritten text.",
                   "",
                   `Original input:\n${inputText}`,
                   "",
                   `Previous output:\n${previousAttemptOutput}`,
-                ].join("\n"),
+                ]
+                    .filter(Boolean)
+                    .join("\n"),
         },
       ];
 
@@ -606,6 +658,7 @@ export async function POST(request: Request) {
       inputWordCount,
       outputWordCount,
       qualityScore: validationResult.qualityScore,
+      styleProfileApplied: Boolean(parsedBody.data.styleProfile),
     });
   } catch (error) {
     const message =
