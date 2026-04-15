@@ -235,6 +235,12 @@ function getMissingMarkers(requiredMarkers: string[], outputMarkers: string[]): 
   return missing;
 }
 
+function hasCitationMarkers(text: string): boolean {
+  return (
+    extractSquareBracketCitations(text).length > 0 || extractAuthorYearCitations(text).length > 0
+  );
+}
+
 function getValidationResult(inputText: string, outputText: string): ValidationResult {
   const issues: string[] = [];
   let qualityScore = 100;
@@ -316,6 +322,16 @@ function getValidationResult(inputText: string, outputText: string): ValidationR
     qualityScore -= Math.min(35, 10 + missingAuthorYear.length * 5);
   }
 
+  if (inputSquareCitations.length === 0 && outputSquareCitations.length > 0) {
+    issues.push("Output introduced citation marker(s) that were not present in input.");
+    qualityScore -= Math.min(35, 12 + outputSquareCitations.length * 4);
+  }
+
+  if (inputAuthorYear.length === 0 && outputAuthorYear.length > 0) {
+    issues.push("Output introduced in-text reference(s) that were not present in input.");
+    qualityScore -= Math.min(35, 10 + outputAuthorYear.length * 4);
+  }
+
   return {
     qualityScore: Math.max(0, Math.min(100, qualityScore)),
     issues,
@@ -382,33 +398,46 @@ async function callMistral({
   messages: MistralMessage[];
   generationConfig: GenerationConfig;
 }): Promise<string> {
-  const mistralResponse = await fetch("https://api.mistral.ai/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${mistralApiKey}`,
-    },
-    body: JSON.stringify({
-      model,
-      temperature: generationConfig.temperature,
-      top_p: generationConfig.topP,
-      max_tokens: generationConfig.maxTokens,
-      messages,
-    }),
-  });
+  const maxRetries = Number(process.env.MISTRAL_MAX_RETRIES || "4");
+  for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
+    const mistralResponse = await fetch("https://api.mistral.ai/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${mistralApiKey}`,
+      },
+      body: JSON.stringify({
+        model,
+        temperature: generationConfig.temperature,
+        top_p: generationConfig.topP,
+        max_tokens: generationConfig.maxTokens,
+        messages,
+      }),
+    });
 
-  if (!mistralResponse.ok) {
+    if (mistralResponse.ok) {
+      const mistralPayload = (await mistralResponse.json()) as MistralResponse;
+      const outputText = mistralPayload.choices?.[0]?.message?.content?.trim();
+      if (!outputText) {
+        throw new Error("Model returned an empty response.");
+      }
+      return outputText;
+    }
+
     const details = await mistralResponse.text();
-    throw new Error(`Mistral request failed (${mistralResponse.status}): ${details}`);
-  }
+    const isRateLimited = mistralResponse.status === 429;
+    if (!isRateLimited || attempt === maxRetries) {
+      throw new Error(`Mistral request failed (${mistralResponse.status}): ${details}`);
+    }
 
-  const mistralPayload = (await mistralResponse.json()) as MistralResponse;
-  const outputText = mistralPayload.choices?.[0]?.message?.content?.trim();
-  if (!outputText) {
-    throw new Error("Model returned an empty response.");
+    const retryAfterSeconds = Number(mistralResponse.headers.get("retry-after") || "0");
+    const retryAfterMs = Number.isFinite(retryAfterSeconds) ? retryAfterSeconds * 1000 : 0;
+    const jitterMs = Math.floor(Math.random() * 700);
+    const exponentialBackoffMs = Math.min(20000, 1200 * 2 ** attempt);
+    const waitMs = Math.max(retryAfterMs, exponentialBackoffMs + jitterMs);
+    await new Promise((resolve) => setTimeout(resolve, waitMs));
   }
-
-  return outputText;
+  throw new Error("Mistral request failed after retries.");
 }
 
 async function refineCandidate({
@@ -420,6 +449,7 @@ async function refineCandidate({
   strength,
   toneProfile,
   generationConfig,
+  preserveCitationMarkers,
 }: {
   mistralApiKey: string;
   model: string;
@@ -429,12 +459,13 @@ async function refineCandidate({
   strength: string;
   toneProfile: ToneProfile;
   generationConfig: GenerationConfig;
+  preserveCitationMarkers: boolean;
 }): Promise<string> {
   const refinementPrompt = [
     "You are performing a deliberate second-pass refinement.",
     "Review the candidate rewrite thoughtfully against all rules.",
     "Improve only where needed and keep factual meaning intact.",
-    "Preserve all citation markers exactly.",
+    preserveCitationMarkers ? "Preserve all citation markers exactly." : null,
     `Tone target: ${tone}. ${toneProfile.instruction}`,
     `Rewrite strength: ${strength}.`,
     `Required style rules: ${toneProfile.requiredStyleRules.join(" ")}`,
@@ -447,7 +478,9 @@ async function refineCandidate({
     candidateText,
     "",
     "Return only the refined final rewrite.",
-  ].join("\n");
+  ]
+    .filter(Boolean)
+    .join("\n");
 
   const refined = await callMistral({
     mistralApiKey,
@@ -516,6 +549,7 @@ export async function POST(request: Request) {
     const tone = parsedBody.data.tone ?? "professional";
     const strength = parsedBody.data.strength ?? "balanced";
     const styleProfileInstruction = getStyleProfileInstruction(parsedBody.data.styleProfile);
+    const preserveCitationMarkers = hasCitationMarkers(inputText);
     const inputWordCount = countWords(inputText);
 
     if (inputWordCount > MAX_WORDS_PER_REQUEST) {
@@ -562,7 +596,9 @@ export async function POST(request: Request) {
                   styleProfileInstruction
                     ? `Voice profile hint: ${styleProfileInstruction}`
                     : null,
-                  "Preserve all citation markers exactly (e.g., [2], [3], [4,7], [8-10], and in-text references).",
+                  preserveCitationMarkers
+                    ? "Preserve all citation markers exactly (e.g., [2], [3], [4,7], [8-10], and in-text references)."
+                    : "Do not add citation markers or in-text references that do not exist in the source.",
                   "",
                   inputText,
                 ]
@@ -579,7 +615,9 @@ export async function POST(request: Request) {
                     ? `Voice profile hint: ${styleProfileInstruction}`
                     : null,
                   `Detected issues: ${validationResult.issues.join(" | ")}`,
-                  "Fix all issues, preserve every citation marker exactly, avoid em-dash overuse, and return only final rewritten text.",
+                  preserveCitationMarkers
+                    ? "Fix all issues, preserve every citation marker exactly, avoid em-dash overuse, and return only final rewritten text."
+                    : "Fix all issues, do not introduce citation markers/references, avoid em-dash overuse, and return only final rewritten text.",
                   "",
                   `Original input:\n${inputText}`,
                   "",
@@ -601,6 +639,7 @@ export async function POST(request: Request) {
         strength,
         toneProfile,
         generationConfig,
+        preserveCitationMarkers,
       });
       validationResult = getValidationResult(inputText, outputText);
 
