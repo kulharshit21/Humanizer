@@ -1,0 +1,80 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://humanizer.local/schemas/detect-response.schema.json",
+  "title": "DetectResponse",
+  "type": "object",
+  "required": [
+    "summary",
+    "detectors",
+    "explainabilitySignals",
+    "sentenceHighlights",
+    "disclaimer",
+    "reducedDetail",
+    "telemetry"
+  ],
+  "properties": {
+    "summary": {
+      "type": "object",
+      "required": ["riskBand", "ensembleScore", "disagreement", "calibratorVersion"],
+      "properties": {
+        "riskBand": { "type": "string", "enum": ["low", "medium", "high", "inconclusive"] },
+        "ensembleScore": { "type": "number" },
+        "disagreement": { "type": "number" },
+        "calibratorVersion": { "type": "string" }
+      }
+    },
+    "detectors": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "name", "status", "label", "confidence", "latencyMs", "score"],
+        "properties": {
+          "id": { "type": "string" },
+          "name": { "type": "string" },
+          "status": { "type": "string", "enum": ["ok", "failed", "timeout", "skipped"] },
+          "label": {
+            "type": "string",
+            "enum": ["likely_human", "mixed", "likely_ai", "inconclusive"]
+          },
+          "confidence": { "type": ["number", "null"] },
+          "latencyMs": { "type": "number" },
+          "score": { "type": ["number", "null"] }
+        }
+      }
+    },
+    "explainabilitySignals": {
+      "type": "object",
+      "required": ["predictability", "variation", "repetition", "domainMismatch"],
+      "properties": {
+        "predictability": { "type": "number" },
+        "variation": { "type": "number" },
+        "repetition": { "type": "number" },
+        "domainMismatch": { "type": "number" }
+      }
+    },
+    "sentenceHighlights": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["sentence", "risk", "reason"],
+        "properties": {
+          "sentence": { "type": "string" },
+          "risk": { "type": "number" },
+          "reason": { "type": "string" }
+        }
+      }
+    },
+    "disclaimer": { "type": "string" },
+    "reducedDetail": { "type": "boolean" },
+    "telemetry": {
+      "type": "object",
+      "required": ["detectorFailures", "detectorTimeouts", "completedDetectors"],
+      "properties": {
+        "detectorFailures": { "type": "number" },
+        "detectorTimeouts": { "type": "number" },
+        "completedDetectors": { "type": "number" }
+      }
+    }
+  }
+}
+

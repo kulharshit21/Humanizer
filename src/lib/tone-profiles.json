@@ -1,0 +1,83 @@
+{
+  "casual": {
+    "instruction": "Use conversational, everyday language with relaxed but clear flow.",
+    "requiredStyleRules": [
+      "Prefer natural sentence openings and avoid stiff formal framing.",
+      "Keep readability high and avoid jargon unless present in source."
+    ],
+    "blockedPatterns": ["therefore", "moreover", "in conclusion"],
+    "defaultDecoding": { "temperatureDelta": 0.05, "topPDelta": 0.02 }
+  },
+  "professional": {
+    "instruction": "Use concise, polished, business-appropriate wording.",
+    "requiredStyleRules": [
+      "Be direct and structured.",
+      "Avoid hype and avoid emotional exaggeration."
+    ],
+    "blockedPatterns": ["game-changing", "revolutionary", "in today's fast-paced world"],
+    "defaultDecoding": { "temperatureDelta": 0.0, "topPDelta": 0.0 }
+  },
+  "creative": {
+    "instruction": "Use expressive but controlled language with vivid rhythm.",
+    "requiredStyleRules": [
+      "Vary sentence lengths for cadence.",
+      "Keep imagery subtle and relevant to source meaning."
+    ],
+    "blockedPatterns": ["generic filler", "empty motivational phrasing"],
+    "defaultDecoding": { "temperatureDelta": 0.08, "topPDelta": 0.03 }
+  },
+  "academic": {
+    "instruction": "Use formal, precise academic prose with evidence-oriented clarity.",
+    "requiredStyleRules": [
+      "Preserve all citations and claim-citation alignment exactly.",
+      "Avoid colloquial phrasing and unsupported synthesis."
+    ],
+    "blockedPatterns": ["casual slang", "marketing tone", "unattributed claims"],
+    "defaultDecoding": { "temperatureDelta": -0.06, "topPDelta": -0.04 }
+  },
+  "linkedin": {
+    "instruction": "Use concise thought-leadership style suitable for LinkedIn.",
+    "requiredStyleRules": [
+      "Lead with clear insight and pragmatic value.",
+      "Avoid clickbait and over-promotional claims."
+    ],
+    "blockedPatterns": ["smash that like", "viral hack", "hard sell CTA spam"],
+    "defaultDecoding": { "temperatureDelta": 0.03, "topPDelta": 0.02 }
+  },
+  "blog": {
+    "instruction": "Use reader-friendly blog style with clear flow and approachable detail.",
+    "requiredStyleRules": [
+      "Maintain coherence between paragraphs.",
+      "Prefer concrete examples when source already implies them."
+    ],
+    "blockedPatterns": ["template intro hooks", "generic SEO fluff"],
+    "defaultDecoding": { "temperatureDelta": 0.04, "topPDelta": 0.02 }
+  },
+  "email": {
+    "instruction": "Use clear, polite email-ready style with practical structure.",
+    "requiredStyleRules": [
+      "Preserve intent, asks, and commitments exactly.",
+      "Avoid verbosity and avoid ambiguous requests."
+    ],
+    "blockedPatterns": ["overly poetic language", "vague commitments"],
+    "defaultDecoding": { "temperatureDelta": -0.03, "topPDelta": -0.01 }
+  },
+  "simplify": {
+    "instruction": "Prioritize plain-language simplification and shorter sentence structure.",
+    "requiredStyleRules": [
+      "Reduce complexity while preserving meaning and key terms.",
+      "Avoid changing domain-critical terminology."
+    ],
+    "blockedPatterns": ["complex clause nesting", "abstract filler"],
+    "defaultDecoding": { "temperatureDelta": -0.08, "topPDelta": -0.05 }
+  },
+  "human-like": {
+    "instruction": "Maximize natural human flow and pragmatic realism while preserving meaning.",
+    "requiredStyleRules": [
+      "Use varied rhythm and non-template phrasing.",
+      "Avoid robotic transitions and rigid list cadence."
+    ],
+    "blockedPatterns": ["as an ai language model", "in conclusion", "furthermore"],
+    "defaultDecoding": { "temperatureDelta": 0.06, "topPDelta": 0.03 }
+  }
+}

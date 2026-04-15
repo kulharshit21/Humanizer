@@ -1,0 +1,51 @@
+{
+  "updatedAt": "2026-04-15T17:42:53.063Z",
+  "source": "grid-search-v1",
+  "tones": {
+    "casual": {
+      "temperatureDelta": 0.13,
+      "topPDelta": 0.07,
+      "sampleCount": 1
+    },
+    "professional": {
+      "temperatureDelta": -0.08,
+      "topPDelta": 0,
+      "sampleCount": 1
+    },
+    "creative": {
+      "temperatureDelta": 0.08,
+      "topPDelta": 0.08,
+      "sampleCount": 1
+    },
+    "academic": {
+      "temperatureDelta": -0.06,
+      "topPDelta": 0.01,
+      "sampleCount": 1
+    },
+    "linkedin": {
+      "temperatureDelta": 0.03,
+      "topPDelta": -0.03,
+      "sampleCount": 1
+    },
+    "blog": {
+      "temperatureDelta": 0.12,
+      "topPDelta": 0.02,
+      "sampleCount": 1
+    },
+    "email": {
+      "temperatureDelta": -0.03,
+      "topPDelta": -0.01,
+      "sampleCount": 1
+    },
+    "simplify": {
+      "temperatureDelta": -0.08,
+      "topPDelta": -0.1,
+      "sampleCount": 1
+    },
+    "human-like": {
+      "temperatureDelta": 0.14,
+      "topPDelta": 0.03,
+      "sampleCount": 1
+    }
+  }
+}

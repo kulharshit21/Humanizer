@@ -1,36 +1,127 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Humanizer Studio
 
-## Getting Started
+Full-stack humanization app built with Next.js, Supabase auth, and Mistral API.
 
-First, run the development server:
+## Features
+
+- Supabase email/password authentication (sign up, sign in, sign out)
+- Protected humanization API route
+- Authenticity-signals detection route with privacy modes
+- Skill-driven rewriting prompt (human-like style cleanup)
+- 1000-word input limit per generation
+- Clean two-panel writing UI with copy support
+
+## Tech Stack
+
+- Next.js (App Router, TypeScript)
+- Supabase (`@supabase/supabase-js`)
+- Mistral Chat Completions API
+- Tailwind CSS
+
+## Setup
+
+1) Install dependencies:
+
+```bash
+npm install
+```
+
+2) Create env file:
+
+```bash
+cp .env.example .env.local
+```
+
+3) Fill `.env.local`:
+
+```env
+NEXT_PUBLIC_SUPABASE_URL=...
+NEXT_PUBLIC_SUPABASE_ANON_KEY=... # or NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY
+NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=...
+MISTRAL_API_KEY=...
+MISTRAL_MODEL=mistral-large-latest
+DETECTOR_ENABLE_GPTZERO=false
+DETECTOR_ENABLE_ORIGINALITYAI=false
+DETECTOR_ENABLE_COPYLEAKS=false
+DETECTOR_ENABLE_SAPLING=false
+DETECTOR_ENABLE_DETECTGPT=false
+GPTZERO_API_KEY=
+ORIGINALITYAI_API_KEY=
+COPYLEAKS_API_KEY=
+COPYLEAKS_EMAIL=
+SAPLING_API_KEY=
+GPTZERO_ENDPOINT=https://api.gptzero.me/v2/predict/text
+GPTZERO_MODEL_VERSION=2024-11-20
+ORIGINALITYAI_ENDPOINT=https://api.originality.ai/api/v3/scan/ai
+COPYLEAKS_AUTH_ENDPOINT=https://id.copyleaks.com/v3/account/login/api
+COPYLEAKS_DETECT_ENDPOINT=
+COPYLEAKS_SENSITIVITY=2
+COPYLEAKS_SANDBOX=false
+SAPLING_ENDPOINT=https://api.sapling.ai/api/v1/aidetect
+```
+
+4) Run dev server:
 
 ```bash
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open [http://localhost:3000](http://localhost:3000).
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Supabase Notes
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+- Enable Email auth in your Supabase project.
+- If email confirmation is enabled, users must verify their email before first sign-in.
+- Run SQL migration before using profile/history storage:
+  - `supabase/migrations/001_user_profiles_and_rewrites.sql`
+- `supabase/migrations/002_rewrites_quality_score.sql`
+- `supabase/migrations/003_detection_scans.sql`
 
-## Learn More
+## API Route
 
-To learn more about Next.js, take a look at the following resources:
+- `POST /api/humanize`
+- Requires `Authorization: Bearer <supabase_access_token>`
+- Body:
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+```json
+{
+  "text": "text to humanize",
+  "tone": "professional",
+  "strength": "balanced"
+}
+```
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+If input exceeds 1000 words, request is rejected.
 
-## Deploy on Vercel
+### Authenticity Signals API
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+- `POST /api/detect`
+- Requires `Authorization: Bearer <supabase_access_token>`
+- Body:
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+```json
+{
+  "text": "text to analyze",
+  "context": { "language": "en", "mode": "academic" },
+  "privacy_mode": "hash_only",
+  "vendor_consent": false,
+  "details_enabled": true
+}
+```
+
+### Important Safety Notes
+
+- Detection output is probabilistic guidance, not proof.
+- The app does not provide detector-evasion coaching or target-score UX.
+- Repeated near-identical rescans get reduced detail.
+- Vendor detectors are behind feature flags and explicit consent.
+
+## Stored Data (Real Data Only)
+
+After running migration SQL, app stores:
+
+- `profiles`: user details (name, role, company, website, bio)
+- `rewrites`: input/output history for each user
+- `detection_scans`: text hash + scores + detector telemetry (raw text only if explicit opt-in)
+
+Tables are protected by RLS and only accessible by the owning user.

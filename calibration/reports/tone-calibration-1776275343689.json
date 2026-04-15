@@ -1,0 +1,62 @@
+{
+  "model": "mistral-large-latest",
+  "strength": "balanced",
+  "fastMode": true,
+  "evaluatedAt": "2026-04-15T17:42:53.063Z",
+  "tones": {
+    "casual": {
+      "sampleCount": 1,
+      "meanScore": 0.539505,
+      "appliedTemperatureDelta": 0.13,
+      "appliedTopPDelta": 0.07
+    },
+    "professional": {
+      "sampleCount": 1,
+      "meanScore": 0.543999,
+      "appliedTemperatureDelta": -0.08,
+      "appliedTopPDelta": 0
+    },
+    "creative": {
+      "sampleCount": 1,
+      "meanScore": 0.469773,
+      "appliedTemperatureDelta": 0.08,
+      "appliedTopPDelta": 0.08
+    },
+    "academic": {
+      "sampleCount": 1,
+      "meanScore": 0.508935,
+      "appliedTemperatureDelta": -0.06,
+      "appliedTopPDelta": 0.01
+    },
+    "linkedin": {
+      "sampleCount": 1,
+      "meanScore": 0.531985,
+      "appliedTemperatureDelta": 0.03,
+      "appliedTopPDelta": -0.03
+    },
+    "blog": {
+      "sampleCount": 1,
+      "meanScore": 0.46406,
+      "appliedTemperatureDelta": 0.12,
+      "appliedTopPDelta": 0.02
+    },
+    "email": {
+      "sampleCount": 1,
+      "meanScore": 0.500298,
+      "appliedTemperatureDelta": -0.03,
+      "appliedTopPDelta": -0.01
+    },
+    "simplify": {
+      "sampleCount": 1,
+      "meanScore": 0.529452,
+      "appliedTemperatureDelta": -0.08,
+      "appliedTopPDelta": -0.1
+    },
+    "human-like": {
+      "sampleCount": 1,
+      "meanScore": 0.489143,
+      "appliedTemperatureDelta": 0.14,
+      "appliedTopPDelta": 0.03
+    }
+  }
+}

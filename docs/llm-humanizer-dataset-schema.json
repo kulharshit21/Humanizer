@@ -1,0 +1,43 @@
+{
+  "record_type": "sft_or_preference_example",
+  "id": "uuid-or-stable-hash",
+  "instruction": "Rewrite naturally while preserving meaning.",
+  "source_text": "Original draft text.",
+  "target_rewrite": "High-quality human rewrite.",
+  "metadata": {
+    "style_tags": ["non-robotic", "concise", "human-rhythm"],
+    "tone_label": "professional",
+    "domain_label": "business_writing",
+    "difficulty_level": "medium",
+    "rewrite_intensity": "balanced",
+    "quality_score": 92,
+    "source_origin": "curated_human_or_synthetic_corrected",
+    "contains_numbers": true,
+    "contains_citations": false
+  },
+  "quality_annotations": {
+    "meaning_preservation": 5,
+    "naturalness": 5,
+    "fluency": 5,
+    "discourse_flow": 4,
+    "lexical_diversity": 4,
+    "hallucination_risk": 1,
+    "robotic_pattern_score": 1
+  },
+  "negatives": [
+    {
+      "type": "meaning_drift",
+      "text": "Rejected candidate that changed facts."
+    },
+    {
+      "type": "robotic_template",
+      "text": "Rejected candidate with repetitive AI cadence."
+    }
+  ],
+  "preference_pair": {
+    "prompt": "Same source text + control tags",
+    "chosen": "Better rewrite",
+    "rejected": "Worse rewrite",
+    "rejection_reasons": ["robotic phrasing", "generic transitions"]
+  }
+}
