@@ -1,12 +1,25 @@
-# Humanizer Studio
+<p align="center">
+  <img src="https://capsule-render.vercel.app/api?type=waving&color=0:4f46e5,100:22d3ee&height=170&section=header&text=Humanizer%20Studio&fontSize=42&fontColor=ffffff&animation=fadeIn" alt="Humanizer Studio Banner" />
+</p>
 
-Humanizer Studio is a full-stack rewriting app that transforms text into more natural, human-like writing while preserving meaning, tone intent, and citation integrity.
+<p align="center">
+  <img src="https://readme-typing-svg.demolab.com?font=Inter&weight=600&size=21&duration=2800&pause=700&color=4F46E5&center=true&vCenter=true&width=820&lines=AI+Text+Humanization+Platform;Privacy-Conscious+Authenticity+Signals;Quality+Scoring%2C+Calibration%2C+and+Safer+Detection+UX" alt="Animated typing intro" />
+</p>
+
+<p align="center">
+  <img src="https://img.shields.io/github/last-commit/kulharshit21/Humanizer?style=for-the-badge&logo=github&color=4f46e5" alt="Last Commit" />
+  <img src="https://img.shields.io/github/license/kulharshit21/Humanizer?style=for-the-badge&color=22d3ee" alt="License" />
+  <img src="https://img.shields.io/badge/Next.js-16-black?style=for-the-badge&logo=nextdotjs" alt="Next.js" />
+  <img src="https://img.shields.io/badge/Supabase-Auth%2BDB-3ecf8e?style=for-the-badge&logo=supabase&logoColor=white" alt="Supabase" />
+</p>
+
+Humanizer Studio is a full-stack rewriting app that transforms text into natural human-like writing while preserving meaning, tone intent, and citation integrity.
 
 It includes:
 - rewrite generation with tone + strength control
-- quality scoring and history
+- quality scoring with rewrite history
 - authenticity-signal analysis with privacy controls
-- Supabase auth, profile, and RLS-protected data storage
+- Supabase auth, profile management, and RLS-protected storage
 
 ## Core capabilities
 
