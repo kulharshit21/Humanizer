@@ -1,55 +1,75 @@
 # Humanizer Studio
 
-Full-stack humanization app built with Next.js, Supabase auth, and Mistral API.
+Humanizer Studio is a full-stack rewriting app that transforms text into more natural, human-like writing while preserving meaning, tone intent, and citation integrity.
 
-## Features
+It includes:
+- rewrite generation with tone + strength control
+- quality scoring and history
+- authenticity-signal analysis with privacy controls
+- Supabase auth, profile, and RLS-protected data storage
 
-- Supabase email/password authentication (sign up, sign in, sign out)
-- Protected humanization API route
-- Authenticity-signals detection route with privacy modes
-- Skill-driven rewriting prompt (human-like style cleanup)
-- 1000-word input limit per generation
-- Clean two-panel writing UI with copy support
+## Core capabilities
 
-## Tech Stack
+- **Rewriting engine**
+  - `POST /api/humanize` using Mistral chat completions
+  - configurable tone modes and rewrite strength
+  - multi-pass refinement + server-side quality validation
+- **Authenticity signals**
+  - `POST /api/detect` with normalized detector output
+  - local detectors + optional vendor adapters (feature-flag + consent gated)
+  - explainability signals and disagreement scoring
+- **Safety and privacy**
+  - probabilistic detection framing (not proof)
+  - no detector-evasion UX
+  - `privacy_mode` support (`no_log`, `hash_only`, `full_text_opt_in`)
+  - abuse safeguards for repeated scans and high request volume
+
+## Tech stack
 
 - Next.js (App Router, TypeScript)
-- Supabase (`@supabase/supabase-js`)
-- Mistral Chat Completions API
-- Tailwind CSS
+- React + Tailwind CSS
+- Supabase (`@supabase/supabase-js`) for auth + data
+- Mistral API for rewrite generation
+- Vitest for detector-focused tests
 
-## Setup
+## Quick start
 
-1) Install dependencies:
+1. Install dependencies:
 
 ```bash
 npm install
 ```
 
-2) Create env file:
+2. Create local env file:
 
 ```bash
 cp .env.example .env.local
 ```
 
-3) Fill `.env.local`:
+3. Fill `.env.local`:
 
 ```env
 NEXT_PUBLIC_SUPABASE_URL=...
 NEXT_PUBLIC_SUPABASE_ANON_KEY=... # or NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY
-NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=...
+NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=
 MISTRAL_API_KEY=...
 MISTRAL_MODEL=mistral-large-latest
+
+# Detector feature flags
 DETECTOR_ENABLE_GPTZERO=false
 DETECTOR_ENABLE_ORIGINALITYAI=false
 DETECTOR_ENABLE_COPYLEAKS=false
 DETECTOR_ENABLE_SAPLING=false
 DETECTOR_ENABLE_DETECTGPT=false
+
+# Vendor credentials (optional)
 GPTZERO_API_KEY=
 ORIGINALITYAI_API_KEY=
 COPYLEAKS_API_KEY=
 COPYLEAKS_EMAIL=
 SAPLING_API_KEY=
+
+# Vendor endpoint overrides (optional)
 GPTZERO_ENDPOINT=https://api.gptzero.me/v2/predict/text
 GPTZERO_MODEL_VERSION=2024-11-20
 ORIGINALITYAI_ENDPOINT=https://api.originality.ai/api/v3/scan/ai
@@ -60,7 +80,7 @@ COPYLEAKS_SANDBOX=false
 SAPLING_ENDPOINT=https://api.sapling.ai/api/v1/aidetect
 ```
 
-4) Run dev server:
+4. Run the app:
 
 ```bash
 npm run dev
@@ -68,20 +88,23 @@ npm run dev
 
 Open [http://localhost:3000](http://localhost:3000).
 
-## Supabase Notes
+## Database setup (Supabase)
 
-- Enable Email auth in your Supabase project.
-- If email confirmation is enabled, users must verify their email before first sign-in.
-- Run SQL migration before using profile/history storage:
-  - `supabase/migrations/001_user_profiles_and_rewrites.sql`
-- `supabase/migrations/002_rewrites_quality_score.sql`
-- `supabase/migrations/003_detection_scans.sql`
+Enable Email auth in Supabase, then run migrations in order:
 
-## API Route
+1. `supabase/migrations/001_user_profiles_and_rewrites.sql`
+2. `supabase/migrations/002_rewrites_quality_score.sql`
+3. `supabase/migrations/003_detection_scans.sql`
 
-- `POST /api/humanize`
-- Requires `Authorization: Bearer <supabase_access_token>`
-- Body:
+All tables are protected by RLS and scoped to authenticated owners.
+
+## API reference
+
+### `POST /api/humanize`
+
+Requires: `Authorization: Bearer <supabase_access_token>`
+
+Request body:
 
 ```json
 {
@@ -91,13 +114,15 @@ Open [http://localhost:3000](http://localhost:3000).
 }
 ```
 
-If input exceeds 1000 words, request is rejected.
+Notes:
+- Input is limited to 1000 words.
+- Response includes generated output and quality score metadata.
 
-### Authenticity Signals API
+### `POST /api/detect`
 
-- `POST /api/detect`
-- Requires `Authorization: Bearer <supabase_access_token>`
-- Body:
+Requires: `Authorization: Bearer <supabase_access_token>`
+
+Request body:
 
 ```json
 {
@@ -109,19 +134,34 @@ If input exceeds 1000 words, request is rejected.
 }
 ```
 
-### Important Safety Notes
+Notes:
+- Returns detector summaries, risk band, disagreement, and explainability signals.
+- Vendor detectors are disabled unless feature flag + consent are enabled.
 
-- Detection output is probabilistic guidance, not proof.
-- The app does not provide detector-evasion coaching or target-score UX.
-- Repeated near-identical rescans get reduced detail.
-- Vendor detectors are behind feature flags and explicit consent.
+## Scripts
 
-## Stored Data (Real Data Only)
+- `npm run dev` - start local development server
+- `npm run lint` - run lint checks
+- `npm run build` - production build validation
+- `npm run test:detect` - run detector-related tests
+- `npm run detect:eval` - evaluate detector scoring against fixture JSONL
+- `npm run calibrate:validate` - validate tone calibration dataset
+- `npm run calibrate:tones` - run tone calibration grid search
 
-After running migration SQL, app stores:
+## Stored data
 
-- `profiles`: user details (name, role, company, website, bio)
-- `rewrites`: input/output history for each user
-- `detection_scans`: text hash + scores + detector telemetry (raw text only if explicit opt-in)
+- `profiles`: user profile metadata
+- `rewrites`: rewrite input/output history + quality metadata
+- `detection_scans`: scan hash, metrics, detector summaries, optional raw text
 
-Tables are protected by RLS and only accessible by the owning user.
+By default, raw text should not be persisted for detection scans unless explicitly opted in.
+
+## Safety policy highlights
+
+- Detection outputs are probabilistic guidance, not definitive proof.
+- The product does not provide bypass/evasion instructions.
+- Avoid using detector output as a sole decision signal for disciplinary actions.
+
+## Changelog
+
+See `CHANGELOG.md` for release notes and migration-impact summaries.
