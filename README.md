@@ -21,6 +21,12 @@ It includes:
 - authenticity-signal analysis with privacy controls
 - Supabase auth, profile management, and RLS-protected storage
 
+## Architecture at a glance
+
+<p align="center">
+  <img src="./docs/assets/architecture-flow.svg" alt="Humanizer Studio animated architecture flow" />
+</p>
+
 ## Core capabilities
 
 - **Rewriting engine**
